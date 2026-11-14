@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Habits</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <h1>Habits</h1>
+  <p class="sub" id="today"></p>
+
+  <form id="add-form">
+    <input type="text" id="habit-name" placeholder="e.g. read 10 pages" maxlength="60" autocomplete="off" required>
+    <button type="submit">Add</button>
+  </form>
+
+  <ul id="habit-list"></ul>
+  <p class="empty" id="empty" hidden>No habits yet. Add one above.</p>
+</main>
+
+<script>
+  const STORAGE_KEY = 'habits.v1';
+
+  const form      = document.getElementById('add-form');
+  const nameInput = document.getElementById('habit-name');
+  const list      = document.getElementById('habit-list');
+  const emptyMsg  = document.getElementById('empty');
+  const todayEl   = document.getElementById('today');
+
+  let habits = load();
+
+  // toISOString() gives UTC, which is the wrong day for most people after ~7pm.
+  // Build the key from local date parts instead.
+  function dateKey(d = new Date()) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  // crypto.randomUUID() needs a secure context; this works anywhere.
+  function makeId() {
+    return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  }
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return []; // corrupted or blocked storage — just start clean
+    }
+  }
+
+  function save() {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(habits));
+  }
+
+  function isDoneToday(habit) {
+    return habit.checked.includes(dateKey());
+  }
+
+  // Count consecutive days ending today, or ending yesterday if today isn't ticked yet
+  // (so a streak isn't broken until you actually miss a whole day).
+  function streakOf(habit) {
+    const cursor = new Date();
+    if (!isDoneToday(habit)) cursor.setDate(cursor.getDate() - 1);
+
+    let n = 0;
+    while (habit.checked.includes(dateKey(cursor))) {
+      n++;
+      cursor.setDate(cursor.getDate() - 1); // JS rolls month/year over for you
+    }
+    return n;
+  }
+
+  function render() {
+    list.innerHTML = '';
+    emptyMsg.hidden = habits.length > 0;
+
+    for (const habit of habits) {
+      const done = isDoneToday(habit);
+      const streak = streakOf(habit);
+
+      const li = document.createElement('li');
+      if (done) li.classList.add('done');
+
+      const check = document.createElement('button');
+      check.className = 'check';
+      check.type = 'button';
+      check.setAttribute('aria-pressed', String(done));
+      check.setAttribute('aria-label', done ? 'Mark not done' : 'Mark done');
+      check.textContent = done ? '✓' : '';
+      check.dataset.action = 'toggle';
+      check.dataset.id = habit.id;
+
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = habit.name;
+
+      const streakEl = document.createElement('span');
+      streakEl.className = 'streak' + (streak >= 3 ? ' hot' : '');
+      streakEl.textContent = streak > 0
+        ? `${streak} day${streak === 1 ? '' : 's'}`
+        : '—';
+
+      const del = document.createElement('button');
+      del.className = 'del';
+      del.type = 'button';
+      del.textContent = '×';
+      del.setAttribute('aria-label', 'Delete habit');
+      del.dataset.action = 'delete';
+      del.dataset.id = habit.id;
+
+      li.append(check, name, streakEl, del);
+      list.append(li);
+    }
+  }
+
+  form.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const name = nameInput.value.trim();
+    if (!name) return;
+
+    habits.push({ id: makeId(), name, checked: [] });
+    nameInput.value = '';
+    save();
+    render();
+  });
+
+  // One listener on the list, not one per row — survives re-renders.
+  list.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-action]');
+    if (!btn) return;
+
+    const habit = habits.find(h => h.id === btn.dataset.id);
+    if (!habit) return;
+
+    if (btn.dataset.action === 'toggle') {
+      const today = dateKey();
+      habit.checked = habit.checked.includes(today)
+        ? habit.checked.filter(d => d !== today)
+        : [...habit.checked, today];
+    } else if (btn.dataset.action === 'delete') {
+      // TODO: confirm before deleting, it's too easy to hit by accident
+      habits = habits.filter(h => h.id !== habit.id);
+    }
+
+    save();
+    render();
+  });
+
+  todayEl.textContent = new Date().toLocaleDateString(undefined, {
+    weekday: 'long', month: 'long', day: 'numeric'
+  });
+
+  render();
+</script>
+</body>
+</html>
